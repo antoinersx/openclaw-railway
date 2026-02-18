@@ -411,6 +411,7 @@ app.get("/setup", requireSetupAuth, (_req, res) => {
         <option value="openclaw.doctor">openclaw doctor</option>
         <option value="openclaw.logs.tail">openclaw logs --tail N</option>
         <option value="openclaw.config.get">openclaw config get &lt;path&gt;</option>
+        <option value="openclaw.config.set">openclaw config set &lt;key value&gt;</option>
         <option value="openclaw.version">openclaw --version</option>
         <option value="openclaw.devices.list">openclaw devices list</option>
         <option value="openclaw.devices.approve">openclaw devices approve &lt;requestId&gt;</option>
@@ -974,6 +975,7 @@ const ALLOWED_CONSOLE_COMMANDS = new Set([
   "openclaw.doctor",
   "openclaw.logs.tail",
   "openclaw.config.get",
+  "openclaw.config.set",
 
   // Device management (for fixing "disconnected (1008): pairing required")
   "openclaw.devices.list",
@@ -1035,6 +1037,25 @@ app.post("/setup/api/console/run", requireSetupAuth, async (req, res) => {
     if (cmd === "openclaw.config.get") {
       if (!arg) return res.status(400).json({ ok: false, error: "Missing config path" });
       const r = await runCmd(OPENCLAW_NODE, clawArgs(["config", "get", arg]));
+      return res.status(r.code === 0 ? 200 : 500).json({ ok: r.code === 0, output: redactSecrets(r.output) });
+    }
+    if (cmd === "openclaw.config.set") {
+      // Accept either simple key=value via arg string, or JSON payload via payload.args
+      // JSON mode: { cmd: "openclaw.config.set", args: { key: "path", value: { ... } } }
+      const args = payload.args;
+      if (args && typeof args === "object" && args.key) {
+        const key = String(args.key);
+        const value = args.value;
+        const jsonFlag = typeof value === "object" ? ["--json"] : [];
+        const valueStr = typeof value === "object" ? JSON.stringify(value) : String(value);
+        const r = await runCmd(OPENCLAW_NODE, clawArgs(["config", "set", ...jsonFlag, key, valueStr]));
+        return res.status(r.code === 0 ? 200 : 500).json({ ok: r.code === 0, output: redactSecrets(r.output) });
+      }
+      // Simple mode: arg = "key value"
+      if (!arg) return res.status(400).json({ ok: false, error: "Missing config key" });
+      const parts = arg.split(/\s+/);
+      if (parts.length < 2) return res.status(400).json({ ok: false, error: "Missing config value (use: key value)" });
+      const r = await runCmd(OPENCLAW_NODE, clawArgs(["config", "set", parts[0], parts.slice(1).join(" ")]));
       return res.status(r.code === 0 ? 200 : 500).json({ ok: r.code === 0, output: redactSecrets(r.output) });
     }
 
